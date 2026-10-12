@@ -71,20 +71,22 @@ function rowWidth(cells: readonly Cells[], hidden: number): number {
 type Env = Readonly<Record<string, string | undefined>>
 
 /**
- * Whether the terminal draws `Image` as a real picture, which takes the kitty graphics protocol.
- * `CLAUDE_IMAGE_VIEW_RENDERER` forces it: `image` for the picture, `blocks` for colored half blocks.
+ * Whether Claude Code will draw `Image` as a real picture. It decides that itself and doesn't tell
+ * mods, so this mirrors its rule as far as the environment shows it: always when
+ * CLAUDE_CODE_FORCE_TERMINAL_IMAGES is set; otherwise never inside tmux or screen or in a
+ * background session, and only when the terminal is kitty or Ghostty (it goes by the terminal's
+ * name, so other kitty-protocol terminals such as WezTerm still get the `alt` text).
+ * `CLAUDE_IMAGE_VIEW_RENDERER` overrides the guess: `image` for the picture, `blocks` for colored half blocks.
  */
 export function drawsPictures(env: Env): boolean {
   const forced = env.CLAUDE_IMAGE_VIEW_RENDERER
   if (forced === 'image' || forced === 'blocks') return forced === 'image'
-  // tmux swallows the protocol, whatever terminal it runs in.
-  if (env.TMUX) return false
-  const term = env.TERM ?? ''
-  const program = env.TERM_PROGRAM ?? ''
+  if (env.CLAUDE_CODE_FORCE_TERMINAL_IMAGES) return true
+  if (env.TMUX || env.STY || env.CLAUDE_CODE_SESSION_KIND === 'bg') return false
   return (
-    Boolean(env.KITTY_WINDOW_ID || env.GHOSTTY_RESOURCES_DIR || env.WEZTERM_EXECUTABLE) ||
-    /kitty|ghostty/i.test(term) ||
-    /^(ghostty|WezTerm)$/i.test(program)
+    Boolean(env.KITTY_WINDOW_ID || env.GHOSTTY_RESOURCES_DIR) ||
+    /kitty|ghostty/i.test(env.TERM ?? '') ||
+    /^ghostty$/i.test(env.TERM_PROGRAM ?? '')
   )
 }
 

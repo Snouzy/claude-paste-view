@@ -30,20 +30,36 @@ const unconvertible = new Set<string>()
 const thumbs = new Map<string, Thumb | null>()
 let pictures: boolean | undefined
 
-// The terminal's own words about itself: there is no capability query, so go by its environment.
+// Claude Code doesn't tell mods whether its Image draws a picture, so go by the environment
+// it decides from.
 async function canDrawPictures($: EngineInterface): Promise<boolean> {
   if (pictures === undefined) {
     pictures = drawsPictures({
       TERM: await $.env.get('TERM'),
       TERM_PROGRAM: await $.env.get('TERM_PROGRAM'),
       TMUX: await $.env.get('TMUX'),
+      STY: await $.env.get('STY'),
       KITTY_WINDOW_ID: await $.env.get('KITTY_WINDOW_ID'),
       GHOSTTY_RESOURCES_DIR: await $.env.get('GHOSTTY_RESOURCES_DIR'),
-      WEZTERM_EXECUTABLE: await $.env.get('WEZTERM_EXECUTABLE'),
+      CLAUDE_CODE_FORCE_TERMINAL_IMAGES: await $.env.get('CLAUDE_CODE_FORCE_TERMINAL_IMAGES'),
+      CLAUDE_CODE_SESSION_KIND: await $.env.get('CLAUDE_CODE_SESSION_KIND'),
       CLAUDE_IMAGE_VIEW_RENDERER: await $.env.get('CLAUDE_IMAGE_VIEW_RENDERER'),
     })
   }
   return pictures
+}
+
+// Claude Code keeps its temp files in <base>/claude-<uid>, or <base>\claude on Windows. The base
+// is CLAUDE_CODE_TMPDIR when set, else /tmp (%TEMP% on Windows): the variable names the folder
+// Claude Code nests its own in, not that folder itself.
+async function tempRoot($: EngineInterface): Promise<string | undefined> {
+  const fromEnv = await $.env.get('CLAUDE_CODE_TMPDIR')
+  if ((await $.env.get('OS')) === 'Windows_NT') {
+    const base = fromEnv ?? (await $.env.get('TEMP'))
+    return base === undefined ? undefined : `${base.replace(/[\\/]+$/, '')}/claude`
+  }
+  const uid = (await $.process.run(['id', '-u'])).stdout.trim()
+  return `${(fromEnv ?? '/tmp').replace(/\/+$/, '')}/claude-${uid}`
 }
 
 // Claude Code caches each paste as <tmp>/<project>/<session>/images/<n>.png. The project
@@ -52,10 +68,8 @@ async function canDrawPictures($: EngineInterface): Promise<boolean> {
 async function imagesDir($: EngineInterface): Promise<string | undefined> {
   const sessionId = await $.session.id()
   if (found?.sessionId === sessionId) return found.dir
-  if (tmpRoot === undefined) {
-    const fromEnv = await $.env.get('CLAUDE_CODE_TMPDIR')
-    tmpRoot = fromEnv ?? `/tmp/claude-${(await $.process.run(['id', '-u'])).stdout.trim()}`
-  }
+  tmpRoot ??= await tempRoot($)
+  if (tmpRoot === undefined) return undefined
   const entries = await $.fs.list(tmpRoot).catch(() => [])
   for (const entry of entries) {
     const dir = `${tmpRoot}/${entry.name}/${sessionId}/images`

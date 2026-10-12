@@ -12,6 +12,11 @@ function pngHead(width: number, height: number): string {
   return btoa(String.fromCharCode(...bytes))
 }
 
+// A session in Ghostty with no CLAUDE_CODE_TMPDIR, run as uid 501: Claude Code's temp folder
+// is /tmp/claude-501.
+const GHOSTTY: Record<string, string> = { TERM_PROGRAM: 'ghostty' }
+const ran = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+
 test('image numbers come from the draft, deduplicated, in order', () => {
   expect(imageNumbers('look [Image #2] and [Image #1] again [Image #2]')).toEqual([2, 1])
   expect(imageNumbers('[Image 1] [image #3] #4')).toEqual([])
@@ -67,7 +72,8 @@ test('a pasted image shows without another keystroke and clears when the draft d
   let draft = 'see [Image #1] [Image #2]'
   on('session.start', () => ({ cwd: '/work' }))
   on('prompt.read', () => ({ value: { text: draft, cursor: draft.length } }))
-  on('env.get', () => ({ value: '/tmp/claude-501' }))
+  on('env.get', ($, e) => ({ value: GHOSTTY[e.name] }))
+  on('process.run', () => ran('501\n'))
   on('session.id', () => ({ value: 'sess-1' }))
   // Another project's folder and a stray file sit beside the one holding this session.
   const entry = { size: 0, mtimeMs: 0, isLink: false }
@@ -108,7 +114,8 @@ test('a tile with no preview is neither re-read nor redrawn on every poll', asyn
   let writes = 0
   on('session.start', () => ({ cwd: '/work' }))
   on('prompt.read', () => ({ value: { text: draft, cursor: draft.length } }))
-  on('env.get', () => ({ value: '/tmp/claude-501' }))
+  on('env.get', ($, e) => ({ value: GHOSTTY[e.name] }))
+  on('process.run', () => ran('501\n'))
   on('session.id', () => ({ value: 'sess-2' }))
   on('fs.list', () => ({ value: [{ name: '-work', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }] }))
   // #1 is a JPEG under a .png name; #2 was never cached.
@@ -136,7 +143,8 @@ test('tiles that don\'t fit become a +N label, and a band too short for one draw
   const draft = Array.from({ length: 10 }, (_, i) => `[Image #${i + 1}]`).join(' ')
   on('session.start', () => ({ cwd: '/work' }))
   on('prompt.read', () => ({ value: { text: draft, cursor: draft.length } }))
-  on('env.get', () => ({ value: '/tmp/claude-501' }))
+  on('env.get', ($, e) => ({ value: GHOSTTY[e.name] }))
+  on('process.run', () => ran('501\n'))
   on('session.id', () => ({ value: 'sess-3' }))
   on('fs.list', () => ({ value: [{ name: '-work', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }] }))
   on('fs.exists', () => ({ value: true }))
@@ -165,7 +173,8 @@ test('a file still too short to hold a PNG header is read again on the next poll
   let reads = 0
   on('session.start', () => ({ cwd: '/work' }))
   on('prompt.read', () => ({ value: { text: draft, cursor: draft.length } }))
-  on('env.get', () => ({ value: '/tmp/claude-501' }))
+  on('env.get', ($, e) => ({ value: GHOSTTY[e.name] }))
+  on('process.run', () => ran('501\n'))
   on('session.id', () => ({ value: 'sess-4' }))
   on('fs.list', () => ({ value: [{ name: '-work', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }] }))
   on('fs.exists', () => ({ value: true }))
@@ -193,7 +202,7 @@ test('a webp paste is converted to PNG once and drawn from the converted file', 
   const runs: (readonly string[])[] = []
   on('session.start', () => ({ cwd: '/work' }))
   on('prompt.read', () => ({ value: { text: draft, cursor: draft.length } }))
-  on('env.get', () => ({ value: '/tmp/claude-501' }))
+  on('env.get', ($, e) => ({ value: GHOSTTY[e.name] }))
   on('session.id', () => ({ value: 'sess-1' }))
   on('fs.list', ($, e) => ({
     value:
@@ -206,9 +215,10 @@ test('a webp paste is converted to PNG once and drawn from the converted file', 
   }))
   on('fs.exists', ($, e) => ({ value: e.path === dir || converted.has(e.path) }))
   on('process.run', ($, e) => {
+    if (e.argv[0] === 'id') return ran('501\n')
     runs.push(e.argv)
     converted.add(e.argv.at(-1) ?? '')
-    return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    return ran('')
   })
   on('fs.read', () => ({ value: { base64: pngHead(800, 400) } }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine band'] }))
@@ -282,15 +292,20 @@ test('a thumbnail is averaged down into half-block cells', () => {
   expect(words[2]).toBe(color(10)) // ...and its background the one below
 })
 
-test('only kitty-protocol terminals get real pictures', () => {
+test('real pictures only where Claude Code draws them: kitty and Ghostty, or when forced', () => {
   expect(drawsPictures({ TERM: 'xterm-kitty' })).toBe(true)
   expect(drawsPictures({ TERM_PROGRAM: 'ghostty' })).toBe(true)
-  expect(drawsPictures({ TERM_PROGRAM: 'WezTerm' })).toBe(true)
   expect(drawsPictures({ KITTY_WINDOW_ID: '4' })).toBe(true)
   expect(drawsPictures({ TERM: 'xterm-256color', TERM_PROGRAM: 'Apple_Terminal' })).toBe(false)
   expect(drawsPictures({ TERM_PROGRAM: 'vscode' })).toBe(false)
-  // tmux eats the protocol, even inside kitty.
+  // WezTerm speaks the protocol, but Claude Code only trusts kitty and Ghostty by name.
+  expect(drawsPictures({ TERM_PROGRAM: 'WezTerm' })).toBe(false)
+  // Claude Code turns pictures off in tmux, screen and background sessions, even inside kitty...
   expect(drawsPictures({ TERM: 'xterm-kitty', TMUX: '/tmp/tmux-501/default,1,0' })).toBe(false)
+  expect(drawsPictures({ TERM: 'xterm-kitty', STY: '1234.pts-0.host' })).toBe(false)
+  expect(drawsPictures({ TERM: 'xterm-kitty', CLAUDE_CODE_SESSION_KIND: 'bg' })).toBe(false)
+  // ...unless they're forced on, which it honors anywhere.
+  expect(drawsPictures({ TMUX: '/tmp/tmux-501/default,1,0', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })).toBe(true)
   // An override beats guessing from the environment.
   expect(drawsPictures({ TERM_PROGRAM: 'iTerm.app', CLAUDE_IMAGE_VIEW_RENDERER: 'image' })).toBe(true)
   expect(drawsPictures({ TERM: 'xterm-kitty', CLAUDE_IMAGE_VIEW_RENDERER: 'blocks' })).toBe(false)
@@ -308,7 +323,8 @@ for (const [name, env, drawn, notDrawn] of [
     const entry = { size: 0, mtimeMs: 0, isLink: false }
     on('session.start', () => ({ cwd: '/work' }))
     on('prompt.read', () => ({ value: { text: 'see [Image #1]', cursor: 14 } }))
-    on('env.get', (_, e) => ({ value: e.name === 'CLAUDE_CODE_TMPDIR' ? '/tmp/claude-501' : (env as Record<string, string>)[e.name] }))
+    on('env.get', (_, e) => ({ value: (env as Record<string, string>)[e.name] }))
+    on('process.run', () => ran('501\n'))
     on('session.id', () => ({ value: session }))
     on('fs.list', () => ({ value: [{ name: '-work', kind: 'dir', ...entry }] }))
     on('fs.exists', (_, e) => ({ value: e.path === dir || e.path === `${dir}/1.png` }))
@@ -323,5 +339,32 @@ for (const [name, env, drawn, notDrawn] of [
     // 64x40 is wider than tall: 6 rows of cells, twice as many columns as 6 * 64 / 40 pixels.
     expect((await ui.find({ type: drawn }))?.props).toMatchObject({ columns: 19, rows: 6 })
     await ui.unmount()
+  })
+}
+
+for (const [platform, env, root] of [
+  ['macOS and Linux', { CLAUDE_CODE_TMPDIR: '/scratch/' }, '/scratch/claude-501'],
+  // The test engine resolves paths for the platform it runs on, so %TEMP% is spelled POSIX-style here.
+  ['Windows', { OS: 'Windows_NT', TEMP: '/Users/me/AppData/Local/Temp\\' }, '/Users/me/AppData/Local/Temp/claude'],
+] as const) {
+  test(`on ${platform} the cache is found where Claude Code nests its temp folder`, async ($, on) => {
+    const clock = mock.clock(on)
+    const listed: string[] = []
+    on('session.start', () => ({ cwd: '/work' }))
+    on('prompt.read', () => ({ value: { text: 'see [Image #1]', cursor: 14 } }))
+    on('env.get', (_, e) => ({ value: (env as Record<string, string>)[e.name] }))
+    on('process.run', () => ran('501\n'))
+    on('session.id', () => ({ value: 'sess-tmp' }))
+    on('fs.list', (_, e) => {
+      listed.push(e.path)
+      return { value: [] }
+    })
+    on('fs.exists', () => ({ value: false }))
+
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+    await clock.advance(200)
+
+    // CLAUDE_CODE_TMPDIR (or %TEMP%) is the base Claude Code makes its own folder in, not that folder.
+    expect(listed[0]).toBe(root)
   })
 }
