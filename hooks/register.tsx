@@ -22,6 +22,8 @@ let isChecking = false
 const sizes = new Map<string, Size | null>()
 // Files whose first bytes aren't a PNG's: they never will be, so they aren't read again.
 const notPng = new Set<string>()
+// Source files sips couldn't convert, so a broken paste isn't retried on every poll.
+const unconvertible = new Set<string>()
 
 // Claude Code caches each paste as <tmp>/<project>/<session>/images/<n>.png. The project
 // folder is named after a working directory that may since have moved, so find it by the
@@ -44,9 +46,30 @@ async function imagesDir($: EngineInterface): Promise<string | undefined> {
   return undefined
 }
 
+// Pastes are cached as <n>.png or <n>.webp (or another format), but the terminal only
+// decodes PNG, so anything else is converted once to <session>/image-view-<n>.png.
+// sips ships with macOS only, so on Linux a non-PNG paste still shows "no preview".
+async function pngFor($: EngineInterface, dir: string, n: number): Promise<string | undefined> {
+  const png = `${dir}/${n}.png`
+  if (await $.fs.exists(png)) return png
+  const out = `${dir.replace(/\/images$/, '')}/image-view-${n}.png`
+  if (await $.fs.exists(out)) return out
+  const entries = await $.fs.list(dir).catch(() => [])
+  const source = entries.find(entry => entry.kind === 'file' && entry.name.startsWith(`${n}.`))
+  if (source === undefined) return undefined
+  const sourcePath = `${dir}/${source.name}`
+  if (unconvertible.has(sourcePath)) return undefined
+  const { exitCode } = await $.process
+    .run(['sips', '-s', 'format', 'png', '-Z', '800', sourcePath, '--out', out])
+    .catch(() => ({ exitCode: 1 }))
+  if (exitCode === 0) return out
+  unconvertible.add(sourcePath)
+  return undefined
+}
+
 async function describe($: EngineInterface, dir: string | undefined, n: number): Promise<PastedImage> {
-  const path = `${dir}/${n}.png`
-  if (dir === undefined || notPng.has(path) || !(await $.fs.exists(path))) return { n, path: null, size: null }
+  const path = dir === undefined ? undefined : await pngFor($, dir, n)
+  if (path === undefined || notPng.has(path)) return { n, path: null, size: null }
   if (!sizes.has(path)) {
     const base64 = await $.fs.read(path, { as: 'bytes' }).then(
       bytes => bytes.base64,
