@@ -56,34 +56,51 @@ Claude Code saves every pasted image to a cache folder for the session, as `<tmp
 
 1. Every 200ms it reads the prompt box and looks for `[Image #n]` tags. It checks on a timer because pasting an image doesn't raise an edit event.
 2. For each tag it finds the cached file. Kitty graphics only draws PNG from a file, so on macOS anything else (WebP, JPEG, HEIC, GIF, TIFF) is converted once with `sips` to `<session>/image-view-<n>.png`. It reads the size from the PNG header.
-3. It draws the thumbnails in the band above the prompt. In a terminal with the kitty graphics protocol it uses Claude Code's `Image` element, and the terminal reads the file itself, so the image data never passes through the mod.
-4. Anywhere else (Terminal.app, VS Code, tmux, most others) it decodes the PNG itself, averages it down to a small thumbnail, and draws it in colored half blocks (`▀`) with Claude Code's `Raster` element. It's lower resolution than a real picture, but it's the picture.
+3. It draws the thumbnails in the band above the prompt. Where Claude Code draws pictures (see [Terminal Support](#terminal-support)) it uses Claude Code's `Image` element, and the terminal reads the file itself, so the image data never passes through the mod.
+4. Anywhere else it decodes the PNG itself, averages it down to a small thumbnail, and draws it in colored half blocks (`▀`) with Claude Code's `Raster` element. It's lower resolution than a real picture, but it's the picture.
+
+## Terminal Support
+
+Claude Code, not the mod, decides whether a terminal gets real pictures. It draws them in kitty (0.28+) and Ghostty, and turns them off inside tmux and screen and in background sessions. Every other terminal gets half-block thumbnails.
+
+| Terminal | Thumbnail |
+|---|---|
+| Ghostty, kitty | Real picture |
+| iTerm2, Terminal.app, WezTerm, VS Code, Windows Terminal, Orca, most others | Half blocks |
+| Inside tmux or screen, even in Ghostty or kitty | Half blocks |
+| Agent view and background sessions | Half blocks, or real pictures with `CLAUDE_CODE_FORCE_TERMINAL_IMAGES` (below) |
+
+Some terminals speak the kitty graphics protocol but still get half blocks, because Claude Code trusts terminals by name ([anthropics/claude-code#99566](https://github.com/anthropics/claude-code/issues/99566)), or because it doesn't wrap images for tmux passthrough yet ([anthropics/claude-code#100146](https://github.com/anthropics/claude-code/issues/100146)). Those are Claude Code limits, so a fix there brings real pictures to the mod with no change here.
+
+`CLAUDE_CODE_FORCE_TERMINAL_IMAGES=1` makes Claude Code draw pictures in any terminal. Only set it if your terminal supports the kitty protocol's Unicode placeholders. VS Code's terminal, for one, doesn't yet, and shows a grid of colored squares instead ([xtermjs/xterm.js#5711](https://github.com/xtermjs/xterm.js/issues/5711)).
 
 ## Security
 
-Claude Image View is local-only. It makes no network requests. It reads the prompt box, lists Claude Code's temp folder to find the current session's image cache, and reads each pasted image (up to Claude Code's 4 MiB read limit). For a non-PNG paste it runs `sips` and writes one PNG thumbnail into that session's temp folder. If `CLAUDE_CODE_TMPDIR` isn't set, it runs `id -u` once to find the default temp folder. It also reads a few terminal variables (`TERM`, `TERM_PROGRAM`, `TMUX` and similar) to tell which kind of thumbnail the terminal can draw.
+Claude Image View is local-only. It makes no network requests. It reads the prompt box, lists Claude Code's temp folder to find the current session's image cache, and reads each pasted image (up to Claude Code's 4 MiB read limit). For a non-PNG paste it runs `sips` and writes one PNG thumbnail into that session's temp folder. On macOS and Linux it runs `id -u` once to find that temp folder. It also reads a few terminal variables (`TERM`, `TERM_PROGRAM`, `TMUX` and similar) to tell which kind of thumbnail Claude Code can draw.
 
 Run `claude plugin validate` on the repo to see every event it hooks and every call it makes.
 
 ## Requirements
 
 - Claude Code v2.1.287 or later (mods support)
-- macOS or Linux
-- A terminal with the kitty graphics protocol, such as [Ghostty](https://ghostty.org) or [kitty](https://sw.kovidgoyal.net/kitty/), for full-resolution thumbnails. Any other terminal gets a half-block thumbnail (best with truecolor).
+- macOS or Linux. Windows finds pastes too, but it's less tested and only previews PNG pastes.
+- For full-resolution thumbnails, [Ghostty](https://ghostty.org) or [kitty](https://sw.kovidgoyal.net/kitty/). Any other terminal gets half-block thumbnails (best with truecolor).
 
 The Claude Desktop app already previews pasted images, so the mod draws nothing there.
 
 ## Troubleshooting
 
-**Nothing appears when I paste.** Run `/plugin` and check the dim line under the tabs lists `image-view` as an active mod. If it isn't listed, run `/reload-plugins`.
+**Nothing appears when I paste.** Run `/plugin` and check the dim line under the tabs lists `image-view` as an active mod. If it isn't listed, run `/reload-plugins`. If it still isn't, look for an `image-view: hooks module did not load` line above the first prompt of a new session: that means your Claude Code is too old for the mod, so update it.
 
-**The tile says "no preview".** The mod couldn't find the cached file, or the paste isn't a PNG and you're on Linux, where `sips` isn't available. Claude Code may have moved where it stores pasted images. Please [open an issue](https://github.com/jarrodwatts/claude-image-view/issues) with your Claude Code version.
+**The tile says "no preview".** The mod couldn't find the cached file, or the paste isn't a PNG and you're not on macOS, where `sips` converts it. Claude Code may have moved where it stores pasted images. Please [open an issue](https://github.com/jarrodwatts/claude-image-view/issues) with your Claude Code version.
 
-**The tile is blocky.** Your terminal doesn't support the kitty graphics protocol, so the mod draws the picture in colored half blocks. Use a terminal with the protocol for sharp thumbnails.
+**The tile is blocky.** Claude Code doesn't draw pictures in your terminal, so the mod draws the picture in colored half blocks. See [Terminal Support](#terminal-support).
 
-**The tile shows `[Image #1]` text instead of the picture.** The mod chose real pictures but your terminal can't draw them (it's probably a kitty-compatible terminal that doesn't implement the protocol). Set `CLAUDE_IMAGE_VIEW_RENDERER=blocks` in the environment you start Claude Code from. `CLAUDE_IMAGE_VIEW_RENDERER=image` forces real pictures the other way, for a terminal the mod doesn't recognize.
+**The tile shows `[Image #1]` text instead of the picture.** The mod expected Claude Code to draw a picture, but it didn't. That happens in terminals that look like Ghostty or kitty but aren't, such as Herdr ([anthropics/claude-code#101306](https://github.com/anthropics/claude-code/issues/101306)), or in kitty older than 0.28. Set `CLAUDE_IMAGE_VIEW_RENDERER=blocks` in the environment you start Claude Code from. `CLAUDE_IMAGE_VIEW_RENDERER=image` forces real pictures the other way.
 
-**The tile shows `[Image #1]` text in agent view or a background session, even in Ghostty or kitty.** Claude Code turns terminal images off for background sessions. If you attach from a terminal with the kitty graphics protocol, turn them back on in the `env` block of `~/.claude/settings.json`, then start a new session:
+**The tile is a grid of colored squares.** `CLAUDE_CODE_FORCE_TERMINAL_IMAGES` is set in a terminal that can't draw Unicode placeholders, such as VS Code's. Unset it to get half-block thumbnails.
+
+**I want real pictures in agent view or a background session.** Claude Code turns terminal images off there. If you attach from Ghostty or kitty, turn them back on in the `env` block of `~/.claude/settings.json`, then start a new session:
 
 ```json
 "env": { "CLAUDE_CODE_FORCE_TERMINAL_IMAGES": "1" }
