@@ -49,6 +49,38 @@ Paste one or more images and a row of thumbnails sits above the prompt, each lab
 - **Thumbnails keep their shape.** Wide screenshots stay wide and phone shots stay tall.
 - **Always fits on screen.** Tiles shrink to fit the space above the prompt, so the row never scrolls or gets cut off. If there are too many, the row ends with `+N` for the rest.
 - **Clears on send.** Once the prompt is sent (or the tags are deleted), the row goes away.
+- **Each tile has controls.** `✎` puts the caret right after the image's tag; `✕` takes the tag out of the prompt. Clicks need [fullscreen rendering](https://code.claude.com/docs/en/fullscreen); otherwise `ctrl+x tab` focuses the band, then the image's number presses its `✕`, and `Tab` + `Enter` the pencil.
+
+### Pasted text
+
+Claude Code folds a multi-line paste into `[Pasted text #n +N lines]` and keeps the text to itself. The mod watches the paste go in, so each folded text gets a note tile next to the images: its first line, its line count, `✎` and `✕`. Click the tile (or `✎`) and an editor opens above the prompt with the text in a field:
+
+- **Save** puts the edited text into the prompt in the open, in place of the tag.
+- **Fold** leaves the mod's own `[Note #n (N lines)]` mark in the prompt instead, and puts the text back when the prompt is sent. Its text is kept in the session's state, so a reload of the mod doesn't lose it.
+- **Cancel** (or Escape) leaves the prompt as it was.
+- **VS Code** writes the text to a temporary file and opens it there (the `code` command line tool must be installed). Each save in VS Code lands in the field; then Save or Fold as usual.
+
+A text pasted before the mod loaded was never seen going in: its tile says so, and only `✕` works for it.
+
+### Paste as is
+
+The mod can't stop Claude Code from folding a paste, but it can paste for you. If a file named `<tmp>/claude-<uid>/image-view/raw-paste-<session id>.txt` appears, its text goes into the prompt at the caret exactly as it is, and the file is emptied. Bind a terminal shortcut to write the clipboard there. With [Herdr](https://herdr.dev), whose shortcuts know the Claude session of the focused pane:
+
+```toml
+[[keys.command]]
+key = "cmd+shift+v"
+type = "shell"
+command = "~/.config/herdr/raw-paste.sh"
+```
+
+```sh
+#!/bin/sh
+sid=$("$HERDR_BIN_PATH" pane get "$HERDR_ACTIVE_PANE_ID" | jq -r '.result.pane.agent_session.value // empty')
+[ -n "$sid" ] || exit 0
+dir="${CLAUDE_CODE_TMPDIR:-/tmp}/claude-$(id -u)/image-view"
+mkdir -p "$dir"
+pbpaste > "$dir/raw-paste-$sid.txt.tmp" && mv "$dir/raw-paste-$sid.txt.tmp" "$dir/raw-paste-$sid.txt"
+```
 
 ## How It Works
 

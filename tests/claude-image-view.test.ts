@@ -1,6 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { afterImage, blockCells, drawsPictures, fitCells, fitRow, imageNumbers, pngSize, removeImage } from '../hooks/layout'
+import { afterImage, blockCells, drawsPictures, fitCells, fitRow, fitTextTiles, imageNumbers, pngSize, removeImage } from '../hooks/layout'
+import { editorRows, expandNotes, lineCount, matchPastes, noteTag, preview, replaceTag, textTags } from '../hooks/pastes'
 import { decodeThumb } from '../hooks/png'
 
 function pngHead(width: number, height: number): string {
@@ -427,4 +428,316 @@ test('the cross removes the tag from the draft and the pencil moves the caret af
   await clock.advance(200)
   const after = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await after.find({ type: 'Button', key: 'remove-1' })).toBeUndefined()
+})
+
+test('text tags are read off the draft in order, Claude Code\'s pastes and the mod\'s notes alike', () => {
+  expect(textTags('a [Note #4 (2 lines)] b [Pasted text #3 +2 lines] c [Pasted text #3 +2 lines] [Pasted text #5]')).toEqual([
+    { kind: 'note', n: 4, lines: 2, tag: '[Note #4 (2 lines)]' },
+    { kind: 'paste', n: 3, lines: 2, tag: '[Pasted text #3 +2 lines]' },
+    { kind: 'paste', n: 5, lines: 0, tag: '[Pasted text #5]' },
+  ])
+  expect(textTags('[Pasted text 3] [Note 4]')).toEqual([])
+  expect(noteTag(7, 'one')).toBe('[Note #7 (1 line)]')
+  expect(noteTag(7, 'one\ntwo\n')).toBe('[Note #7 (3 lines)]')
+  expect(lineCount('')).toBe(1)
+})
+
+test('pastes seen going in are paired with the tags that appear, by line count first', () => {
+  const tags = textTags('[Pasted text #1 +4 lines] [Pasted text #2 +1 lines] [Pasted text #3 +9 lines]')
+  // #2 is already known; the two-line paste fits #1's "+1 lines" only, so #1 waits for the next one.
+  const pending = ['x\ny', 'a\nb\nc\nd\ne', 'p\nq\nr']
+  const matched = matchPastes(tags, new Set([2]), pending)
+  expect([...matched]).toEqual([
+    [1, 'a\nb\nc\nd\ne'],
+    [3, 'x\ny'],
+  ])
+  expect(pending).toEqual(['p\nq\nr'])
+  // Nothing pending: nothing paired.
+  expect(matchPastes(tags, new Set(), []).size).toBe(0)
+})
+
+test('a preview is the first line with words, cut to the tile', () => {
+  expect(preview('\n   \n  Hello world, this is a long first line indeed\nmore', 24)).toBe('Hello world, this is a …')
+  expect(preview('short\nlonger', 24)).toBe('short')
+  expect(preview('\n\n', 24)).toBe('')
+})
+
+test('replacing a tag keeps the caret in place, and notes expand when the prompt is sent', () => {
+  expect(replaceTag('see [Note #4 (2 lines)] now [Note #4 (2 lines)]', 27, '[Note #4 (2 lines)]', 'a\nb')).toEqual({ text: 'see a\nb now a\nb', cursor: 11 })
+  // A caret inside the tag lands after what replaced it.
+  expect(replaceTag('[Note #4 (2 lines)] x', 5, '[Note #4 (2 lines)]', 'ab')).toEqual({ text: 'ab x', cursor: 2 })
+  expect(expandNotes('x [Note #4 (2 lines)] y [Note #9 (1 line)]', { '4': 'a\nb' })).toBe('x a\nb y [Note #9 (1 line)]')
+})
+
+test('note tiles fit after the image tiles, with a +N label for the rest', () => {
+  const image = { columns: 12, rows: 6 }
+  // One image is 14 columns; each note tile 26 plus a gap: two fit in 72 columns beside " +1" (71), three need 94.
+  expect(fitTextTiles(3, [image], 20, 72)).toBe(2)
+  expect(fitTextTiles(3, [image], 20, 70)).toBe(1)
+  expect(fitTextTiles(3, [image], 20, 120)).toBe(3)
+  // A band shorter than a note tile draws none; no notes, none.
+  expect(fitTextTiles(3, [image], 6, 120)).toBe(0)
+  expect(fitTextTiles(0, [], 20, 120)).toBe(0)
+})
+
+test('pasted texts get a note tile; the cross removes the tag, the editor rewrites it, and notes expand on send', async ($, on) => {
+  const clock = mock.clock(on)
+  let draft = 'see [Pasted text #3 +2 lines] and [Note #4 (2 lines)] end'
+  let cursor = draft.length
+  const fills: { text: string; cursor: number | undefined }[] = []
+  const opened: string[] = []
+  const closed: string[] = []
+  let submitted: string | undefined
+  on('session.start', () => ({ cwd: '/work' }))
+  on('prompt.read', () => ({ value: { text: draft, cursor } }))
+  on('prompt.fill', ($, e) => {
+    fills.push({ text: e.text, cursor: e.cursor })
+    draft = e.text
+    cursor = e.cursor ?? draft.length
+    return { isFilled: true, text: draft, cursor }
+  })
+  on('prompt.submit', ($, e) => {
+    submitted = e.text
+    return { text: e.text }
+  })
+  on('env.get', ($, e) => ({ value: GHOSTTY[e.name] }))
+  on('process.run', ($, e) => (e.argv[0] === 'pbpaste' ? ran('one line only') : ran('501\n')))
+  on('session.id', () => ({ value: 'sess-6' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.exists', () => ({ value: false }))
+  // Note #4 was folded earlier in the session: its text is in the session's state.
+  on('state.get', ($, e, next) => (e.key === 'notes' ? { value: { value: { '4': 'alpha beta\ngamma' }, version: 1 } } : next(e)))
+  on('ui.open', ($, e) => {
+    opened.push(e.id)
+    return { value: { isPlaced: true } }
+  })
+  on('ui.close', ($, e) => {
+    closed.push(e.id)
+    return { value: undefined }
+  })
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine band'] }))
+
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.advance(200)
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  // The paste went in before the mod loaded and the clipboard holds something else: no text to show.
+  expect((await ui.find({ type: 'Button', key: 'open-text-3' }))?.props).toMatchObject({ label: '(text not captured)' })
+  expect((await ui.find({ type: 'Button', key: 'open-text-4' }))?.props).toMatchObject({ label: 'alpha beta' })
+  expect(await ui.find({ type: 'Text', text: '2 lines' })).toBeDefined()
+
+  // Sending expands the note; Claude Code expands its own paste itself.
+  await $.prompt.submit({ text: draft, wait: false, origin: { kind: 'composer' } })
+  expect(submitted).toBe('see [Pasted text #3 +2 lines] and alpha beta\ngamma end')
+
+  await ui.press({ key: 'remove-text-3' })
+  expect(fills.at(-1)).toEqual({ text: 'see and [Note #4 (2 lines)] end', cursor: 31 })
+
+  // A tile whose text is unknown still opens the editor, empty.
+  await ui.press({ key: 'edit-text-3' })
+  expect(opened).toEqual(['image-view-text'])
+  await ui.press({ key: 'edit-text-4' })
+  expect(opened).toEqual(['image-view-text', 'image-view-text'])
+  await ui.unmount()
+
+  const pane = await $.ui.mount({
+    plugin: 'image-view',
+    component: 'Pane',
+    requestId: 'image-view-text',
+    surface: 'terminal',
+    props: { title: 'Text #4', isFocused: true, bodyColumns: 60, placement: 'inline', scroll: { offset: 0, bodyRows: 16 }, view: {} },
+  })
+  // Two short lines: the field is three rows, the smallest it gets.
+  expect((await pane.find({ type: 'Input', key: 'text' }))?.props).toMatchObject({ value: 'alpha beta\ngamma', rows: 3 })
+  // Enter saves: the text goes into the draft in place of the mark, and the pane closes.
+  // The caret stood at the end: it moves back by what the shorter text saved.
+  await pane.input({ key: 'text', text: 'one\ntwo\nthree' })
+  expect(fills.at(-1)).toEqual({ text: 'see and one\ntwo\nthree end', cursor: 25 })
+  expect(closed).toEqual(['image-view-text'])
+  await pane.unmount()
+})
+
+test('folding from the editor leaves the mod\'s own mark and keeps the text for sending', async ($, on) => {
+  const clock = mock.clock(on)
+  let draft = 'see [Note #4 (2 lines)] end'
+  let cursor = 4
+  const fills: { text: string; cursor: number | undefined }[] = []
+  const stored: Record<string, string>[] = []
+  on('session.start', () => ({ cwd: '/work' }))
+  on('prompt.read', () => ({ value: { text: draft, cursor } }))
+  on('prompt.fill', ($, e) => {
+    fills.push({ text: e.text, cursor: e.cursor })
+    draft = e.text
+    cursor = e.cursor ?? draft.length
+    return { isFilled: true, text: draft, cursor }
+  })
+  on('env.get', ($, e) => ({ value: GHOSTTY[e.name] }))
+  on('process.run', () => ran('501\n'))
+  on('session.id', () => ({ value: 'sess-7' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.exists', () => ({ value: false }))
+  on('state.get', ($, e, next) => (e.key === 'notes' ? { value: { value: { '4': 'alpha\nbeta' }, version: 1 } } : next(e)))
+  on('state.set', ($, e, next) => {
+    if (e.key === 'notes') stored.push(e.value as Record<string, string>)
+    return next(e)
+  })
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.close', () => ({ value: undefined }))
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine band'] }))
+
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.advance(200)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  await ui.press({ key: 'open-text-4' })
+  await ui.unmount()
+
+  const pane = await $.ui.mount({
+    plugin: 'image-view',
+    component: 'Pane',
+    requestId: 'image-view-text',
+    surface: 'terminal',
+    props: { title: 'Text #4', isFocused: true, bodyColumns: 60, placement: 'inline', scroll: { offset: 0, bodyRows: 16 }, view: {} },
+  })
+  await pane.input({ key: 'text', text: 'one\ntwo\nthree', kind: 'change' })
+  await pane.press({ key: 'fold' })
+  expect(fills.at(-1)).toEqual({ text: 'see [Note #4 (3 lines)] end', cursor: 4 })
+  expect(stored.at(-1)).toEqual({ '4': 'one\ntwo\nthree' })
+  await pane.unmount()
+})
+
+test('a raw paste left in the session\'s file goes into the draft as it is, once', async ($, on) => {
+  const clock = mock.clock(on)
+  const file = '/tmp/claude-501/image-view/raw-paste-sess-8.txt'
+  let content = 'line one\nline two'
+  let mtimeMs = 10
+  const fills: { text: string; mode: string }[] = []
+  const writes: string[] = []
+  on('session.start', () => ({ cwd: '/work' }))
+  on('prompt.read', () => ({ value: { text: 'hi ', cursor: 3 } }))
+  on('prompt.fill', ($, e) => {
+    fills.push({ text: e.text, mode: e.mode })
+    return { isFilled: true, text: `hi ${e.text}`, cursor: 3 + e.text.length }
+  })
+  on('env.get', ($, e) => ({ value: GHOSTTY[e.name] }))
+  on('process.run', () => ran('501\n'))
+  on('session.id', () => ({ value: 'sess-8' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.exists', ($, e) => ({ value: e.path === file }))
+  on('fs.stat', () => ({ value: { kind: 'file', size: content.length, mtimeMs, isLink: false } }))
+  on('fs.read', () => ({ value: content }))
+  on('fs.write', ($, e) => {
+    writes.push(e.path)
+    content = e.text
+    return { value: undefined }
+  })
+
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.advance(200)
+  expect(fills).toEqual([{ text: 'line one\nline two', mode: 'insert' }])
+  expect(writes).toEqual([file])
+
+  // The emptied file is not inserted again; a new paste (a new modification time) is.
+  await clock.advance(200)
+  expect(fills.length).toBe(1)
+  content = 'again'
+  mtimeMs = 20
+  await clock.advance(200)
+  expect(fills.at(-1)).toEqual({ text: 'again', mode: 'insert' })
+})
+
+test('a paste the mod never saw going in is read off the clipboard when the line count agrees', async ($, on) => {
+  const clock = mock.clock(on)
+  let draft = 'see [Pasted text #5 +2 lines]'
+  let clip = 'first\nsecond\nthird'
+  on('session.start', () => ({ cwd: '/work' }))
+  on('prompt.read', () => ({ value: { text: draft, cursor: draft.length } }))
+  on('env.get', ($, e) => ({ value: GHOSTTY[e.name] }))
+  on('process.run', ($, e) => (e.argv[0] === 'pbpaste' ? ran(clip) : ran('501\n')))
+  on('session.id', () => ({ value: 'sess-9' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.exists', () => ({ value: false }))
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine band'] }))
+
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.advance(200)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect((await ui.find({ type: 'Button', key: 'open-text-5' }))?.props).toMatchObject({ label: 'first' })
+  await ui.unmount()
+
+  // A later tag with a clipboard of another shape stays unknown; the first keeps its text.
+  draft = 'see [Pasted text #5 +2 lines] [Pasted text #6 +9 lines]'
+  clip = 'something else'
+  await clock.advance(200)
+  const later = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect((await later.find({ type: 'Button', key: 'open-text-5' }))?.props).toMatchObject({ label: 'first' })
+  expect((await later.find({ type: 'Button', key: 'open-text-6' }))?.props).toMatchObject({ label: '(text not captured)' })
+  await later.unmount()
+})
+
+test('the editor\'s field grows to show the whole text when the pane has the room', () => {
+  // Four lines, one of which wraps to three rows over 60 columns: six rows plus one spare.
+  const text = 'one\ntwo\n' + 'x'.repeat(130) + '\nfour'
+  expect(editorRows(text, 60, 40)).toBe(7)
+  // A short pane caps it; a tiny text still gets three rows.
+  expect(editorRows(text, 60, 10)).toBe(5)
+  expect(editorRows('hi', 60, 40)).toBe(3)
+})
+
+test('the editor hands the text to VS Code and takes each save there back into the field', async ($, on) => {
+  const clock = mock.clock(on)
+  const draft = 'see [Note #4 (2 lines)] end'
+  const file = '/tmp/claude-501/image-view/edit-sess-10-4.txt'
+  const files = new Map<string, { text: string; mtimeMs: number }>()
+  const argvs: string[][] = []
+  on('session.start', () => ({ cwd: '/work' }))
+  on('prompt.read', () => ({ value: { text: draft, cursor: draft.length } }))
+  on('env.get', ($, e) => ({ value: GHOSTTY[e.name] }))
+  on('process.run', ($, e) => {
+    argvs.push([...e.argv])
+    return ran(e.argv[0] === 'id' ? '501\n' : '')
+  })
+  on('session.id', () => ({ value: 'sess-10' }))
+  on('fs.list', () => ({ value: [] }))
+  on('fs.exists', ($, e) => ({ value: files.has(e.path) }))
+  on('fs.write', ($, e) => {
+    files.set(e.path, { text: e.text, mtimeMs: 100 })
+    return { value: undefined }
+  })
+  on('fs.stat', ($, e) => {
+    const held = files.get(e.path)
+    if (held === undefined) throw new Error('ENOENT')
+    return { value: { kind: 'file', size: held.text.length, mtimeMs: held.mtimeMs, isLink: false } }
+  })
+  on('fs.read', ($, e) => ({ value: files.get(e.path)?.text ?? '' }))
+  on('state.get', ($, e, next) => (e.key === 'notes' ? { value: { value: { '4': 'alpha\nbeta' }, version: 1 } } : next(e)))
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.close', () => ({ value: undefined }))
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine band'] }))
+
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.advance(200)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  await ui.press({ key: 'open-text-4' })
+  await ui.unmount()
+
+  const PANE = {
+    plugin: 'image-view',
+    component: 'Pane',
+    requestId: 'image-view-text',
+    surface: 'terminal',
+    props: { title: 'Text #4', isFocused: true, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
+  } as const
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'code' })
+  expect(files.get(file)?.text).toBe('alpha\nbeta')
+  expect(argvs.at(-1)).toEqual(['code', '--reuse-window', file])
+  await pane.unmount()
+
+  // A save in VS Code: the file's time moves, and the field shows the new text on the next poll.
+  files.set(file, { text: 'alpha\nbeta\ngamma', mtimeMs: 200 })
+  await clock.advance(200)
+  const again = await $.ui.mount(PANE)
+  expect((await again.find({ type: 'Input', key: 'text' }))?.props).toMatchObject({ value: 'alpha\nbeta\ngamma' })
+  expect(await again.find({ type: 'Text', text: /each save there lands here/ })).toBeDefined()
+  await again.unmount()
 })

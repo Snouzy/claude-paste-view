@@ -1,3 +1,5 @@
+import { removeTag } from './pastes'
+
 export type Size = { width: number; height: number }
 export type Cells = { columns: number; rows: number }
 
@@ -23,25 +25,9 @@ export function imageNumbers(draft: string): number[] {
 
 const tagOf = (n: number) => `[Image #${n}]`
 
-/**
- * The draft with every `[Image #n]` tag taken out, each with the space after it (or, at the end
- * of a word, the one before it) so the words around it don't run together; and where the caret
- * lands: where it was, moved back over what went before it, or to the tag's start if it stood inside.
- */
+/** The draft with every `[Image #n]` tag taken out (see `removeTag`), and where the caret lands. */
 export function removeImage(draft: string, cursor: number, n: number): { text: string; cursor: number } {
-  const tag = tagOf(n)
-  let text = draft
-  let at = cursor
-  for (let start = text.lastIndexOf(tag); start >= 0; start = text.lastIndexOf(tag, start - 1)) {
-    let end = start + tag.length
-    if (text[end] === ' ') end++
-    else if (text[start - 1] === ' ') start--
-    text = text.slice(0, start) + text.slice(end)
-    if (at >= end) at -= end - start
-    else if (at > start) at = start
-    if (start === 0) break
-  }
-  return { text, cursor: Math.max(0, Math.min(at, text.length)) }
+  return removeTag(draft, cursor, tagOf(n))
 }
 
 /** The offset just past the first `[Image #n]` tag of the draft, or null when it has none. */
@@ -91,6 +77,26 @@ export function fitRow(sizes: readonly (Size | null)[], maxRows: number, bodyCol
   let count = cells.length
   while (count > 0 && rowWidth(cells.slice(0, count), cells.length - count) > bodyColumns) count--
   return cells.slice(0, count)
+}
+
+// A note tile: a border, a number row, two rows of preview, a line count and the controls row.
+export const TEXT_TILE_COLUMNS = 24
+export const TEXT_TILE_ROWS = 7
+
+/**
+ * How many note tiles fit on the row after the image tiles (`cells`), each `TEXT_TILE_COLUMNS` wide
+ * inside its border, leaving room for a `+N` label when some are left out; none when the band is
+ * shorter than a note tile.
+ */
+export function fitTextTiles(count: number, cells: readonly Cells[], maxRows: number, bodyColumns: number): number {
+  if (count === 0 || maxRows < TEXT_TILE_ROWS) return 0
+  const images = rowWidth(cells, 0)
+  for (let shown = count; shown > 0; shown--) {
+    const tiles = shown * (TEXT_TILE_COLUMNS + TILE_CHROME_COLUMNS) + GAP * shown
+    const label = shown < count ? GAP + `+${count - shown}`.length : 0
+    if (images + tiles + label <= bodyColumns) return shown
+  }
+  return 0
 }
 
 function rowWidth(cells: readonly Cells[], hidden: number): number {
