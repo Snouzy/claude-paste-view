@@ -1,26 +1,28 @@
 {
-  "name": "claude-image-view",
+  "name": "claude-paste-view",
   "owner": {
-    "name": "Jarrod Watts",
-    "url": "https://github.com/jarrodwatts"
+    "name": "Mathias Bradiceanu",
+    "url": "https://github.com/Snouzy"
   },
   "plugins": [
     {
-      "name": "image-view",
+      "name": "paste-view",
       "source": "./",
-      "description": "See the images you paste into Claude Code: thumbnails above the prompt instead of bare [Image #1] tags",
+      "description": "See and edit what you paste into Claude Code: image thumbnails and text notes above the prompt, an editor for pasted text, and a paste that is never folded",
       "category": "productivity",
       "tags": [
         "images",
         "paste",
+        "pasted text",
         "preview",
         "thumbnails",
+        "editor",
         "mod",
         "terminal"
       ]
     }
   ],
   "metadata": {
-    "description": "See the images you paste into Claude Code"
+    "description": "See and edit what you paste into Claude Code"
   }
 }

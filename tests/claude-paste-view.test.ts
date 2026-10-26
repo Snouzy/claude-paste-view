@@ -76,7 +76,7 @@ test('a row too wide even at one row keeps the tiles that fit beside a +N label'
 })
 
 const BAND = {
-  plugin: 'image-view',
+  plugin: 'paste-view',
   component: 'AbovePrompt',
   requestId: 'above-prompt',
   viewport: { columns: 120, rows: 40 },
@@ -213,7 +213,7 @@ test('a webp paste is converted to PNG once and drawn from the converted file', 
   const clock = mock.clock(on)
   const session = '/tmp/claude-501/-work/sess-1'
   const dir = `${session}/images`
-  const out = `${session}/image-view-1.png`
+  const out = `${session}/paste-view-1.png`
   const draft = 'see [Image #1]'
   const entry = { size: 0, mtimeMs: 0, isLink: false }
   const converted = new Set<string>()
@@ -325,8 +325,8 @@ test('real pictures only where Claude Code draws them: kitty and Ghostty, or whe
   // ...unless they're forced on, which it honors anywhere.
   expect(drawsPictures({ TMUX: '/tmp/tmux-501/default,1,0', CLAUDE_CODE_FORCE_TERMINAL_IMAGES: '1' })).toBe(true)
   // An override beats guessing from the environment.
-  expect(drawsPictures({ TERM_PROGRAM: 'iTerm.app', CLAUDE_IMAGE_VIEW_RENDERER: 'image' })).toBe(true)
-  expect(drawsPictures({ TERM: 'xterm-kitty', CLAUDE_IMAGE_VIEW_RENDERER: 'blocks' })).toBe(false)
+  expect(drawsPictures({ TERM_PROGRAM: 'iTerm.app', CLAUDE_PASTE_VIEW_RENDERER: 'image' })).toBe(true)
+  expect(drawsPictures({ TERM: 'xterm-kitty', CLAUDE_PASTE_VIEW_RENDERER: 'blocks' })).toBe(false)
 })
 
 for (const [name, env, drawn, notDrawn] of [
@@ -535,15 +535,15 @@ test('pasted texts get a note tile; the cross removes the tag, the editor rewrit
 
   // A tile whose text is unknown still opens the editor, empty.
   await ui.press({ key: 'edit-text-3' })
-  expect(opened).toEqual(['image-view-text'])
+  expect(opened).toEqual(['paste-view-text'])
   await ui.press({ key: 'edit-text-4' })
-  expect(opened).toEqual(['image-view-text', 'image-view-text'])
+  expect(opened).toEqual(['paste-view-text', 'paste-view-text'])
   await ui.unmount()
 
   const pane = await $.ui.mount({
-    plugin: 'image-view',
+    plugin: 'paste-view',
     component: 'Pane',
-    requestId: 'image-view-text',
+    requestId: 'paste-view-text',
     surface: 'terminal',
     props: { title: 'Text #4', isFocused: true, bodyColumns: 60, placement: 'inline', scroll: { offset: 0, bodyRows: 16 }, view: {} },
   })
@@ -553,7 +553,7 @@ test('pasted texts get a note tile; the cross removes the tag, the editor rewrit
   // The caret stood at the end: it moves back by what the shorter text saved.
   await pane.input({ key: 'text', text: 'one\ntwo\nthree' })
   expect(fills.at(-1)).toEqual({ text: 'see and one\ntwo\nthree end', cursor: 25 })
-  expect(closed).toEqual(['image-view-text'])
+  expect(closed).toEqual(['paste-view-text'])
   await pane.unmount()
 })
 
@@ -592,9 +592,9 @@ test('folding from the editor leaves the mod\'s own mark and keeps the text for 
   await ui.unmount()
 
   const pane = await $.ui.mount({
-    plugin: 'image-view',
+    plugin: 'paste-view',
     component: 'Pane',
-    requestId: 'image-view-text',
+    requestId: 'paste-view-text',
     surface: 'terminal',
     props: { title: 'Text #4', isFocused: true, bodyColumns: 60, placement: 'inline', scroll: { offset: 0, bodyRows: 16 }, view: {} },
   })
@@ -607,7 +607,7 @@ test('folding from the editor leaves the mod\'s own mark and keeps the text for 
 
 test('a raw paste left in the session\'s file goes into the draft as it is, once', async ($, on) => {
   const clock = mock.clock(on)
-  const file = '/tmp/claude-501/image-view/raw-paste-sess-8.txt'
+  const file = '/tmp/claude-501/paste-view/raw-paste-sess-8.txt'
   let content = 'line one\nline two'
   let mtimeMs = 10
   const fills: { text: string; mode: string }[] = []
@@ -686,7 +686,7 @@ test('the editor\'s field grows to show the whole text when the pane has the roo
 test('the editor hands the text to VS Code and takes each save there back into the field', async ($, on) => {
   const clock = mock.clock(on)
   const draft = 'see [Note #4 (2 lines)] end'
-  const file = '/tmp/claude-501/image-view/edit-sess-10-4.txt'
+  const file = '/tmp/claude-501/paste-view/edit-sess-10-4.txt'
   const files = new Map<string, { text: string; mtimeMs: number }>()
   const argvs: string[][] = []
   on('session.start', () => ({ cwd: '/work' }))
@@ -721,9 +721,9 @@ test('the editor hands the text to VS Code and takes each save there back into t
   await ui.unmount()
 
   const PANE = {
-    plugin: 'image-view',
+    plugin: 'paste-view',
     component: 'Pane',
-    requestId: 'image-view-text',
+    requestId: 'paste-view-text',
     surface: 'terminal',
     props: { title: 'Text #4', isFocused: true, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
   } as const

@@ -112,10 +112,10 @@ type Env = Readonly<Record<string, string | undefined>>
  * CLAUDE_CODE_FORCE_TERMINAL_IMAGES is set; otherwise never inside tmux or screen or in a
  * background session, and only when the terminal is kitty or Ghostty (it goes by the terminal's
  * name, so other kitty-protocol terminals such as WezTerm still get the `alt` text).
- * `CLAUDE_IMAGE_VIEW_RENDERER` overrides the guess: `image` for the picture, `blocks` for colored half blocks.
+ * `CLAUDE_PASTE_VIEW_RENDERER` overrides the guess: `image` for the picture, `blocks` for colored half blocks.
  */
 export function drawsPictures(env: Env): boolean {
-  const forced = env.CLAUDE_IMAGE_VIEW_RENDERER
+  const forced = env.CLAUDE_PASTE_VIEW_RENDERER
   if (forced === 'image' || forced === 'blocks') return forced === 'image'
   if (env.CLAUDE_CODE_FORCE_TERMINAL_IMAGES) return true
   if (env.TMUX || env.STY || env.CLAUDE_CODE_SESSION_KIND === 'bg') return false

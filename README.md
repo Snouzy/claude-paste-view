@@ -1,19 +1,20 @@
-# Claude Image View
+# Claude Paste View
 
-A Claude Code mod that shows the images you paste, so you see thumbnails above your prompt instead of bare `[Image #1]` tags.
+A Claude Code mod for what you paste: thumbnails of pasted images above the prompt instead of bare `[Image #1]` tags, a note tile for each folded `[Pasted text #1 +4 lines]` with an editor behind it, and a shortcut that pastes text without Claude Code folding it.
 
-[![License](https://img.shields.io/github/license/jarrodwatts/claude-image-view?v=2)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/jarrodwatts/claude-image-view)](https://github.com/jarrodwatts/claude-image-view/stargazers)
+Started as a fork of [jarrodwatts/claude-image-view](https://github.com/jarrodwatts/claude-image-view) (MIT), which drew the thumbnails; the controls, the pasted-text tiles, the editor and the raw paste were added here.
 
-![Claude Image View in action](claude-image-view.png)
+[![License](https://img.shields.io/github/license/Snouzy/claude-paste-view)](LICENSE)
+
+![Claude Paste View in action](claude-paste-view.png)
 
 ## Install
 
 Inside Claude Code, run:
 
 ```
-/plugin marketplace add jarrodwatts/claude-image-view
-/plugin install image-view
+/plugin marketplace add Snouzy/claude-paste-view
+/plugin install paste-view@claude-paste-view
 /reload-plugins
 ```
 
@@ -23,8 +24,8 @@ That's it. Paste an image into the prompt and its thumbnail appears above the in
 <summary><strong>Prefer the terminal?</strong></summary>
 
 ```bash
-claude plugin marketplace add jarrodwatts/claude-image-view
-claude plugin install image-view@claude-image-view
+claude plugin marketplace add Snouzy/claude-paste-view
+claude plugin install paste-view@claude-paste-view
 ```
 
 Then run `/reload-plugins` inside a session, or start a new one.
@@ -64,7 +65,7 @@ A text pasted before the mod loaded was never seen going in: its tile says so, a
 
 ### Paste as is
 
-The mod can't stop Claude Code from folding a paste, but it can paste for you. If a file named `<tmp>/claude-<uid>/image-view/raw-paste-<session id>.txt` appears, its text goes into the prompt at the caret exactly as it is, and the file is emptied. Bind a terminal shortcut to write the clipboard there. With [Herdr](https://herdr.dev), whose shortcuts know the Claude session of the focused pane:
+The mod can't stop Claude Code from folding a paste, but it can paste for you. If a file named `<tmp>/claude-<uid>/paste-view/raw-paste-<session id>.txt` appears, its text goes into the prompt at the caret exactly as it is, and the file is emptied. Bind a terminal shortcut to write the clipboard there. With [Herdr](https://herdr.dev), whose shortcuts know the Claude session of the focused pane:
 
 ```toml
 [[keys.command]]
@@ -77,17 +78,17 @@ command = "~/.config/herdr/raw-paste.sh"
 #!/bin/sh
 sid=$("$HERDR_BIN_PATH" pane get "$HERDR_ACTIVE_PANE_ID" | jq -r '.result.pane.agent_session.value // empty')
 [ -n "$sid" ] || exit 0
-dir="${CLAUDE_CODE_TMPDIR:-/tmp}/claude-$(id -u)/image-view"
+dir="${CLAUDE_CODE_TMPDIR:-/tmp}/claude-$(id -u)/paste-view"
 mkdir -p "$dir"
 pbpaste > "$dir/raw-paste-$sid.txt.tmp" && mv "$dir/raw-paste-$sid.txt.tmp" "$dir/raw-paste-$sid.txt"
 ```
 
 ## How It Works
 
-Claude Code saves every pasted image to a cache folder for the session, as `<tmp>/<project>/<session>/images/<n>.<ext>` in the format it was pasted (`.png`, `.webp`, `.jpg`, ...), and puts an `[Image #n]` tag in the prompt. Claude Image View is a [mod](https://code.claude.com/docs/en/plugins/mods/overview):
+Claude Code saves every pasted image to a cache folder for the session, as `<tmp>/<project>/<session>/images/<n>.<ext>` in the format it was pasted (`.png`, `.webp`, `.jpg`, ...), and puts an `[Image #n]` tag in the prompt. Claude Paste View is a [mod](https://code.claude.com/docs/en/plugins/mods/overview):
 
 1. Every 200ms it reads the prompt box and looks for `[Image #n]` tags. It checks on a timer because pasting an image doesn't raise an edit event.
-2. For each tag it finds the cached file. Kitty graphics only draws PNG from a file, so on macOS anything else (WebP, JPEG, HEIC, GIF, TIFF) is converted once with `sips` to `<session>/image-view-<n>.png`. It reads the size from the PNG header.
+2. For each tag it finds the cached file. Kitty graphics only draws PNG from a file, so on macOS anything else (WebP, JPEG, HEIC, GIF, TIFF) is converted once with `sips` to `<session>/paste-view-<n>.png`. It reads the size from the PNG header.
 3. It draws the thumbnails in the band above the prompt. Where Claude Code draws pictures (see [Terminal Support](#terminal-support)) it uses Claude Code's `Image` element, and the terminal reads the file itself, so the image data never passes through the mod.
 4. Anywhere else it decodes the PNG itself, averages it down to a small thumbnail, and draws it in colored half blocks (`▀`) with Claude Code's `Raster` element. It's lower resolution than a real picture, but it's the picture.
 
@@ -108,7 +109,7 @@ Some terminals speak the kitty graphics protocol but still get half blocks, beca
 
 ## Security
 
-Claude Image View is local-only. It makes no network requests. It reads the prompt box, lists Claude Code's temp folder to find the current session's image cache, and reads each pasted image (up to Claude Code's 4 MiB read limit). For a non-PNG paste it runs `sips` and writes one PNG thumbnail into that session's temp folder. On macOS and Linux it runs `id -u` once to find that temp folder. It also reads a few terminal variables (`TERM`, `TERM_PROGRAM`, `TMUX` and similar) to tell which kind of thumbnail Claude Code can draw.
+Claude Paste View is local-only. It makes no network requests. It reads the prompt box, lists Claude Code's temp folder to find the current session's image cache, and reads each pasted image (up to Claude Code's 4 MiB read limit). For a non-PNG paste it runs `sips` and writes one PNG thumbnail into that session's temp folder. On macOS and Linux it runs `id -u` once to find that temp folder. It also reads a few terminal variables (`TERM`, `TERM_PROGRAM`, `TMUX` and similar) to tell which kind of thumbnail Claude Code can draw.
 
 Run `claude plugin validate` on the repo to see every event it hooks and every call it makes.
 
@@ -122,13 +123,13 @@ The Claude Desktop app already previews pasted images, so the mod draws nothing 
 
 ## Troubleshooting
 
-**Nothing appears when I paste.** Run `/plugin` and check the dim line under the tabs lists `image-view` as an active mod. If it isn't listed, run `/reload-plugins`. If it still isn't, look for an `image-view: hooks module did not load` line above the first prompt of a new session: that means your Claude Code is too old for the mod, so update it.
+**Nothing appears when I paste.** Run `/plugin` and check the dim line under the tabs lists `paste-view` as an active mod. If it isn't listed, run `/reload-plugins`. If it still isn't, look for an `paste-view: hooks module did not load` line above the first prompt of a new session: that means your Claude Code is too old for the mod, so update it.
 
-**The tile says "no preview".** The mod couldn't find the cached file, or the paste isn't a PNG and you're not on macOS, where `sips` converts it. Claude Code may have moved where it stores pasted images. Please [open an issue](https://github.com/jarrodwatts/claude-image-view/issues) with your Claude Code version.
+**The tile says "no preview".** The mod couldn't find the cached file, or the paste isn't a PNG and you're not on macOS, where `sips` converts it. Claude Code may have moved where it stores pasted images. Please [open an issue](https://github.com/Snouzy/claude-paste-view/issues) with your Claude Code version.
 
 **The tile is blocky.** Claude Code doesn't draw pictures in your terminal, so the mod draws the picture in colored half blocks. See [Terminal Support](#terminal-support).
 
-**The tile shows `[Image #1]` text instead of the picture.** The mod expected Claude Code to draw a picture, but it didn't. That happens in terminals that look like Ghostty or kitty but aren't, such as Herdr ([anthropics/claude-code#101306](https://github.com/anthropics/claude-code/issues/101306)), or in kitty older than 0.28. Set `CLAUDE_IMAGE_VIEW_RENDERER=blocks` in the environment you start Claude Code from. `CLAUDE_IMAGE_VIEW_RENDERER=image` forces real pictures the other way.
+**The tile shows `[Image #1]` text instead of the picture.** The mod expected Claude Code to draw a picture, but it didn't. That happens in terminals that look like Ghostty or kitty but aren't, such as Herdr ([anthropics/claude-code#101306](https://github.com/anthropics/claude-code/issues/101306)), or in kitty older than 0.28. Set `CLAUDE_PASTE_VIEW_RENDERER=blocks` in the environment you start Claude Code from. `CLAUDE_PASTE_VIEW_RENDERER=image` forces real pictures the other way.
 
 **The tile is a grid of colored squares.** `CLAUDE_CODE_FORCE_TERMINAL_IMAGES` is set in a terminal that can't draw Unicode placeholders, such as VS Code's. Unset it to get half-block thumbnails.
 
@@ -141,8 +142,8 @@ The Claude Desktop app already previews pasted images, so the mod draws nothing 
 ## Development
 
 ```bash
-git clone https://github.com/jarrodwatts/claude-image-view
-cd claude-image-view
+git clone https://github.com/Snouzy/claude-paste-view
+cd claude-paste-view
 
 # Load it for one session without installing
 claude --plugin-dir .
@@ -160,4 +161,4 @@ MIT. See [LICENSE](LICENSE).
 
 ## Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=jarrodwatts/claude-image-view&type=Date)](https://star-history.com/#jarrodwatts/claude-image-view&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=Snouzy/claude-paste-view&type=Date)](https://star-history.com/#Snouzy/claude-paste-view&Date)

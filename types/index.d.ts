@@ -19,7 +19,7 @@ export type PastedText = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'image-view': {
+    'paste-view': {
       images: PastedImage[]
       texts: PastedText[]
       /** The text behind each `[Note #n (N lines)]` of the draft, by `n`; put back when the prompt is sent. */

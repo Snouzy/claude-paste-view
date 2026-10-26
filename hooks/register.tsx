@@ -13,19 +13,19 @@ import type { Thumb } from './png'
 // so the draft is polled instead.
 const POLL_MS = 200
 // The pane the pasted-text editor draws in.
-const EDITOR = 'image-view-text'
+const EDITOR = 'paste-view-text'
 // Pastes seen at prompt.edit and not yet paired with a `[Pasted text #n]` tag: a few at most,
 // so a paste the editor never folded doesn't pile up.
 const PENDING_MAX = 8
 
-const images = atom({ plugin: 'image-view', key: 'images' } as const, [] as PastedImage[])
-const texts = atom({ plugin: 'image-view', key: 'texts' } as const, [] as PastedText[])
+const images = atom({ plugin: 'paste-view', key: 'images' } as const, [] as PastedImage[])
+const texts = atom({ plugin: 'paste-view', key: 'texts' } as const, [] as PastedText[])
 // The texts behind the mod's own `[Note #n (N lines)]` marks: session state, so a reload of the
 // mod doesn't lose what a sent prompt must carry.
-const NOTES = { plugin: 'image-view', key: 'notes' } as const
+const NOTES = { plugin: 'paste-view', key: 'notes' } as const
 const notes = atom(NOTES, {} as Record<string, string>)
 // Bumped when a save in VS Code changes the editor's text, so the pane draws the new text.
-const editorTick = atom({ plugin: 'image-view', key: 'editor' } as const, 0)
+const editorTick = atom({ plugin: 'paste-view', key: 'editor' } as const, 0)
 
 let tmpRoot: string | undefined
 let found: { sessionId: string; dir: string } | undefined
@@ -80,7 +80,7 @@ async function canDrawPictures($: EngineInterface): Promise<boolean> {
       GHOSTTY_RESOURCES_DIR: await $.env.get('GHOSTTY_RESOURCES_DIR'),
       CLAUDE_CODE_FORCE_TERMINAL_IMAGES: await $.env.get('CLAUDE_CODE_FORCE_TERMINAL_IMAGES'),
       CLAUDE_CODE_SESSION_KIND: await $.env.get('CLAUDE_CODE_SESSION_KIND'),
-      CLAUDE_IMAGE_VIEW_RENDERER: await $.env.get('CLAUDE_IMAGE_VIEW_RENDERER'),
+      CLAUDE_PASTE_VIEW_RENDERER: await $.env.get('CLAUDE_PASTE_VIEW_RENDERER'),
     })
   }
   return pictures
@@ -119,12 +119,12 @@ async function imagesDir($: EngineInterface): Promise<string | undefined> {
 }
 
 // Pastes are cached as <n>.png or <n>.webp (or another format), but the terminal only
-// decodes PNG, so anything else is converted once to <session>/image-view-<n>.png.
+// decodes PNG, so anything else is converted once to <session>/paste-view-<n>.png.
 // sips ships with macOS only, so on Linux a non-PNG paste still shows "no preview".
 async function pngFor($: EngineInterface, dir: string, n: number): Promise<string | undefined> {
   const png = `${dir}/${n}.png`
   if (await $.fs.exists(png)) return png
-  const out = `${dir.replace(/\/images$/, '')}/image-view-${n}.png`
+  const out = `${dir.replace(/\/images$/, '')}/paste-view-${n}.png`
   if (await $.fs.exists(out)) return out
   const entries = await $.fs.list(dir).catch(() => [])
   const source = entries.find(entry => entry.kind === 'file' && entry.name.startsWith(`${n}.`))
@@ -214,7 +214,7 @@ async function showTexts($: EngineInterface, draft: string) {
 // session (see the README): it goes into the draft as it is, so Claude Code never folds it.
 async function rawPastePath($: EngineInterface): Promise<string | undefined> {
   tmpRoot ??= await tempRoot($)
-  return tmpRoot === undefined ? undefined : `${tmpRoot}/image-view/raw-paste-${await $.session.id()}.txt`
+  return tmpRoot === undefined ? undefined : `${tmpRoot}/paste-view/raw-paste-${await $.session.id()}.txt`
 }
 
 async function insertRawPaste($: EngineInterface) {
@@ -402,7 +402,7 @@ export const register: Register = on => {
     const openInCode = async () => {
       tmpRoot ??= await tempRoot($)
       if (tmpRoot === undefined) return
-      const file = `${tmpRoot}/image-view/edit-${await $.session.id()}-${item.n}.txt`
+      const file = `${tmpRoot}/paste-view/edit-${await $.session.id()}-${item.n}.txt`
       await $.fs.write(file, item.text)
       const stat = await $.fs.stat(file).catch(() => undefined)
       item.file = file

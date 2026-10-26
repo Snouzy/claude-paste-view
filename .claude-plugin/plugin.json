@@ -1,14 +1,24 @@
 {
-  "name": "image-view",
-  "description": "See the images you paste into Claude Code: thumbnails above the prompt instead of bare [Image #1] tags",
-  "version": "0.2.0",
+  "name": "paste-view",
+  "description": "See and edit what you paste into Claude Code: image thumbnails and text notes above the prompt, an editor for pasted text, and a paste that is never folded",
+  "version": "0.3.0",
   "author": {
-    "name": "Jarrod Watts",
-    "url": "https://github.com/jarrodwatts"
+    "name": "Mathias Bradiceanu",
+    "url": "https://github.com/Snouzy"
   },
-  "homepage": "https://github.com/jarrodwatts/claude-image-view",
-  "repository": "https://github.com/jarrodwatts/claude-image-view",
+  "homepage": "https://github.com/Snouzy/claude-paste-view",
+  "repository": "https://github.com/Snouzy/claude-paste-view",
   "license": "MIT",
-  "keywords": ["images", "paste", "preview", "thumbnails", "mod", "terminal", "claude-code"],
+  "keywords": [
+    "images",
+    "paste",
+    "pasted text",
+    "preview",
+    "thumbnails",
+    "editor",
+    "mod",
+    "terminal",
+    "claude-code"
+  ],
   "types": "./types/index.d.ts"
 }
