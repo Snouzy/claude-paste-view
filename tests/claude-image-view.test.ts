@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { blockCells, drawsPictures, fitCells, fitRow, imageNumbers, pngSize } from '../hooks/layout'
+import { afterImage, blockCells, drawsPictures, fitCells, fitRow, imageNumbers, pngSize, removeImage } from '../hooks/layout'
 import { decodeThumb } from '../hooks/png'
 
 function pngHead(width: number, height: number): string {
@@ -22,6 +22,22 @@ test('image numbers come from the draft, deduplicated, in order', () => {
   expect(imageNumbers('[Image 1] [image #3] #4')).toEqual([])
 })
 
+test('removing an image takes its tags and one neighbouring space out, and keeps the caret in place', () => {
+  // The caret sits after the second tag: it moves back over what was removed before it.
+  expect(removeImage('see [Image #1] and [Image #1] now', 29, 1)).toEqual({ text: 'see and now', cursor: 8 })
+  // At the end of a word, the space before the tag goes instead.
+  expect(removeImage('fix this [Image #2]', 5, 2)).toEqual({ text: 'fix this', cursor: 5 })
+  // A caret inside the tag lands where the tag began.
+  expect(removeImage('[Image #3] why', 4, 3)).toEqual({ text: 'why', cursor: 0 })
+  // Another image's tag is untouched.
+  expect(removeImage('[Image #1] [Image #12]', 22, 1)).toEqual({ text: '[Image #12]', cursor: 11 })
+})
+
+test('editing after an image puts the caret just past its first tag', () => {
+  expect(afterImage('a [Image #4] b [Image #4]', 4)).toBe(12)
+  expect(afterImage('a [Image #4] b', 5)).toBeNull()
+})
+
 test('PNG size is read from the IHDR header', () => {
   expect(pngSize(pngHead(1630, 632))).toEqual({ width: 1630, height: 632 })
   expect(pngSize(btoa('\xff\xd8\xff\xe0 this is a jpeg, not a png...'))).toBeNull()
@@ -32,30 +48,30 @@ test('thumbnails keep aspect ratio within the tile', () => {
   expect(fitCells({ width: 500, height: 500 })).toEqual({ columns: 12, rows: 6 })
   // Very wide: capped at 32 columns, rows shrink to match.
   expect(fitCells({ width: 3000, height: 500 })).toEqual({ columns: 32, rows: 3 })
-  // Very tall: never narrower than 4 columns.
-  expect(fitCells({ width: 100, height: 2000 })).toEqual({ columns: 4, rows: 6 })
+  // Very tall: never narrower than 11 columns, the controls row's width.
+  expect(fitCells({ width: 100, height: 2000 })).toEqual({ columns: 11, rows: 6 })
 })
 
 test('a row of tiles shrinks to fit the band so it never scrolls', () => {
   const square = { width: 500, height: 500 }
   // Plenty of room: full 6-row tiles.
   expect(fitRow([square], 20, 120)).toEqual([{ columns: 12, rows: 6 }])
-  // A short band: border and label take 3 rows, so the picture gets the rest.
-  expect(fitRow([square], 7, 120)).toEqual([{ columns: 8, rows: 4 }])
-  // A narrow band: three 6-row squares need 3 * 14 + 2 = 44 columns; 40 forces 5 rows.
-  expect(fitRow([square, square, square], 20, 40)).toEqual([
-    { columns: 10, rows: 5 },
-    { columns: 10, rows: 5 },
-    { columns: 10, rows: 5 },
+  // A short band: border, number and controls take 4 rows, so the picture gets the rest.
+  expect(fitRow([square], 7, 120)).toEqual([{ columns: 11, rows: 3 }])
+  // A narrow band: three 6-row squares need 3 * 14 + 2 = 44 columns; 42 forces 5 rows (11 wide, the minimum).
+  expect(fitRow([square, square, square], 20, 42)).toEqual([
+    { columns: 11, rows: 5 },
+    { columns: 11, rows: 5 },
+    { columns: 11, rows: 5 },
   ])
 })
 
 test('a row too wide even at one row keeps the tiles that fit beside a +N label', () => {
   const square = { width: 500, height: 500 }
-  // One-row squares are 4 + 2 columns: five with gaps take 34, but " +5" makes it 37.
-  expect(fitRow(Array(10).fill(square), 20, 36)).toEqual(Array(4).fill({ columns: 4, rows: 1 }))
-  // Under one tile's height (3 rows of chrome and 1 of picture), nothing is drawn.
-  expect(fitRow([square], 3, 120)).toEqual([])
+  // One-row squares are 11 + 2 columns: three with gaps take 41; two take 27, and " +8" makes it 30.
+  expect(fitRow(Array(10).fill(square), 20, 36)).toEqual(Array(2).fill({ columns: 11, rows: 1 }))
+  // Under one tile's height (4 rows of chrome and 1 of picture), nothing is drawn.
+  expect(fitRow([square], 4, 120)).toEqual([])
 })
 
 const BAND = {
@@ -155,9 +171,10 @@ test('tiles that don\'t fit become a +N label, and a band too short for one draw
   await clock.advance(200)
 
   const narrow = await $.ui.mount({ ...BAND, surface: 'terminal', props: { ...BAND.props, bodyColumns: 36 } })
-  expect(await narrow.find({ type: 'Text', text: '#4' })).toBeDefined()
-  expect(await narrow.find({ type: 'Text', text: '#5' })).toBeUndefined()
-  expect(await narrow.find({ type: 'Text', text: '+6' })).toBeDefined()
+  // One-row tiles are 11 + 2 columns wide: two fit beside the "+8" label.
+  expect(await narrow.find({ type: 'Text', text: '#2' })).toBeDefined()
+  expect(await narrow.find({ type: 'Text', text: '#3' })).toBeUndefined()
+  expect(await narrow.find({ type: 'Text', text: '+8' })).toBeDefined()
   await narrow.unmount()
 
   const short = await $.ui.mount({ ...BAND, surface: 'terminal', props: { ...BAND.props, maxRows: 3 } })
@@ -368,3 +385,46 @@ for (const [platform, env, root] of [
     expect(listed[0]).toBe(root)
   })
 }
+
+test('the cross removes the tag from the draft and the pencil moves the caret after it', async ($, on) => {
+  const clock = mock.clock(on)
+  const dir = '/tmp/claude-501/-work/sess-3/images'
+  let draft = 'see [Image #1] and more'
+  let cursor = draft.length
+  const fills: { text: string; cursor?: number }[] = []
+  on('session.start', () => ({ cwd: '/work' }))
+  on('prompt.read', () => ({ value: { text: draft, cursor } }))
+  on('prompt.fill', ($, e) => {
+    fills.push({ text: e.text, cursor: e.cursor })
+    draft = e.text
+    cursor = e.cursor ?? draft.length
+    return { isFilled: true, text: draft, cursor }
+  })
+  on('env.get', ($, e) => ({ value: GHOSTTY[e.name] }))
+  on('process.run', () => ran('501\n'))
+  on('session.id', () => ({ value: 'sess-3' }))
+  on('fs.list', () => ({ value: [{ name: '-work', kind: 'dir', size: 0, mtimeMs: 0, isLink: false }] }))
+  on('fs.exists', ($, e) => ({ value: e.path === dir || e.path === `${dir}/1.png` }))
+  on('fs.read', () => ({ value: { base64: pngHead(800, 400) } }))
+  on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine band'] }))
+
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await clock.advance(200)
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ type: 'Button', key: 'edit-1' })).toBeDefined()
+  // The image's number is the cross's hotkey once the band has the focus (ctrl+x tab).
+  expect((await ui.find({ type: 'Button', key: 'remove-1' }))?.props).toMatchObject({ hotkey: '1' })
+  await ui.press({ key: 'edit-1' })
+  expect(fills.at(-1)).toEqual({ text: 'see [Image #1] and more', cursor: 14 })
+
+  // The caret stood right after the tag: it lands where the tag began.
+  await ui.press({ key: 'remove-1' })
+  expect(fills.at(-1)).toEqual({ text: 'see and more', cursor: 4 })
+  await ui.unmount()
+
+  // The draft no longer names the image: the next poll clears the tiles.
+  await clock.advance(200)
+  const after = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await after.find({ type: 'Button', key: 'remove-1' })).toBeUndefined()
+})

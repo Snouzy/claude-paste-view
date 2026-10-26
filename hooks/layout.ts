@@ -3,13 +3,14 @@ export type Cells = { columns: number; rows: number }
 
 const TILE_ROWS = 6
 const MAX_COLUMNS = 32
-const MIN_COLUMNS = 4
+// Wide enough for the controls row: `[ ✎ ] [ ✕ ]`.
+const MIN_COLUMNS = 11
 // A terminal cell is about twice as tall as it is wide.
 const CELL_ASPECT = 2
 // Used when the size is unknown (file over $.fs.read's 4 MiB cap, or no file).
 const FALLBACK: Size = { width: 16, height: 10 }
-// Each tile adds a border on every side and a label row under the picture.
-const TILE_CHROME_ROWS = 3
+// Each tile adds a border on every side, a number row over the picture and a controls row under it.
+const TILE_CHROME_ROWS = 4
 const TILE_CHROME_COLUMNS = 2
 const GAP = 1
 
@@ -18,6 +19,35 @@ export function imageNumbers(draft: string): number[] {
   const seen = new Set<number>()
   for (const match of draft.matchAll(/\[Image #(\d+)\]/g)) seen.add(Number(match[1]))
   return [...seen]
+}
+
+const tagOf = (n: number) => `[Image #${n}]`
+
+/**
+ * The draft with every `[Image #n]` tag taken out, each with the space after it (or, at the end
+ * of a word, the one before it) so the words around it don't run together; and where the caret
+ * lands: where it was, moved back over what went before it, or to the tag's start if it stood inside.
+ */
+export function removeImage(draft: string, cursor: number, n: number): { text: string; cursor: number } {
+  const tag = tagOf(n)
+  let text = draft
+  let at = cursor
+  for (let start = text.lastIndexOf(tag); start >= 0; start = text.lastIndexOf(tag, start - 1)) {
+    let end = start + tag.length
+    if (text[end] === ' ') end++
+    else if (text[start - 1] === ' ') start--
+    text = text.slice(0, start) + text.slice(end)
+    if (at >= end) at -= end - start
+    else if (at > start) at = start
+    if (start === 0) break
+  }
+  return { text, cursor: Math.max(0, Math.min(at, text.length)) }
+}
+
+/** The offset just past the first `[Image #n]` tag of the draft, or null when it has none. */
+export function afterImage(draft: string, n: number): number | null {
+  const start = draft.indexOf(tagOf(n))
+  return start < 0 ? null : start + tagOf(n).length
 }
 
 /** Width and height from a PNG's IHDR chunk, or null when the bytes aren't a PNG. */

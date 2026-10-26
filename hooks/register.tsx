@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { PastedImage } from '../types'
-import { blockCells, drawsPictures, fitRow, imageNumbers, pngSize } from './layout'
+import { afterImage, blockCells, drawsPictures, fitRow, imageNumbers, pngSize, removeImage } from './layout'
 import type { Size } from './layout'
 import { decodeThumb } from './png'
 import type { Thumb } from './png'
@@ -158,7 +158,20 @@ export const register: Register = on => {
     const list = await read($, images)
     if (list.length === 0) return next(e)
 
-    const { Box, Image, Raster, Text } = $.ui.resolve(e)
+    const { Box, Button, Image, Raster, Text } = $.ui.resolve(e)
+
+    // The cross takes every `[Image #n]` tag out of the draft; the pencil puts the caret just past
+    // the first one. Both rewrite the draft as it stands, so what the person typed around stays.
+    const remove = async (n: number) => {
+      const box = await $.prompt.read()
+      const draft = removeImage(box.text, box.cursor, n)
+      await $.prompt.fill({ text: draft.text, cursor: draft.cursor })
+    }
+    const edit = async (n: number) => {
+      const box = await $.prompt.read()
+      const at = afterImage(box.text, n)
+      if (at !== null) await $.prompt.fill({ text: box.text, cursor: at })
+    }
     const cells = fitRow(list.map(image => image.size), e.props.maxRows, e.props.bodyColumns)
     if (cells.length === 0) return next(e)
     const hidden = list.length - cells.length
@@ -171,6 +184,7 @@ export const register: Register = on => {
             const { columns, rows } = cells[i] ?? { columns: 4, rows: 1 }
             return (
               <Box key={`tile-${image.n}`} flexDirection="column" alignItems="center" borderStyle="round" borderDimColor>
+                <Text dimColor>#{image.n}</Text>
                 {image.path === null ? (
                   <Box width={columns} height={rows} alignItems="center" justifyContent="center">
                     <Text dimColor wrap="truncate">no preview</Text>
@@ -191,7 +205,18 @@ export const register: Register = on => {
                     alt={`[Image #${image.n}]`}
                   />
                 )}
-                <Text dimColor>#{image.n}</Text>
+                <Box flexDirection="row" columnGap={1}>
+                  <Button key={`edit-${image.n}`} dimColor label="✎" onPress={() => void edit(image.n)} />
+                  {/* On the main screen the terminal keeps the mouse, so the band is reached with
+                      ctrl+x tab; the image's own number then removes it (the pencil is a Tab away). */}
+                  <Button
+                    key={`remove-${image.n}`}
+                    dimColor
+                    label="✕"
+                    hotkey={image.n <= 9 ? String(image.n) : undefined}
+                    onPress={() => void remove(image.n)}
+                  />
+                </Box>
               </Box>
             )
           })}
