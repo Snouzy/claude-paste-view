@@ -442,18 +442,20 @@ test('text tags are read off the draft in order, Claude Code\'s pastes and the m
   expect(lineCount('')).toBe(1)
 })
 
-test('pastes seen going in are paired with the tags that appear, by line count first', () => {
+test('pastes seen going in are paired with the tags that appear only when the line count agrees', () => {
   const tags = textTags('[Pasted text #1 +4 lines] [Pasted text #2 +1 lines] [Pasted text #3 +9 lines]')
-  // #2 is already known; the two-line paste fits #1's "+1 lines" only, so #1 waits for the next one.
+  // #2 is already known; the five-line paste fits #1's "+4 lines"; nothing fits #3, which stays unknown.
   const pending = ['x\ny', 'a\nb\nc\nd\ne', 'p\nq\nr']
   const matched = matchPastes(tags, new Set([2]), pending)
-  expect([...matched]).toEqual([
-    [1, 'a\nb\nc\nd\ne'],
-    [3, 'x\ny'],
-  ])
-  expect(pending).toEqual(['p\nq\nr'])
+  expect([...matched]).toEqual([[1, 'a\nb\nc\nd\ne']])
+  expect(pending).toEqual(['x\ny', 'p\nq\nr'])
   // Nothing pending: nothing paired.
   expect(matchPastes(tags, new Set(), []).size).toBe(0)
+  // A short paste Claude Code never folded sits in pending: a long paste's tag must not take it
+  // (it did once, and "B1 · Encre" opened in the editor of an eight-line paste).
+  const stale = ['B1 · Encre']
+  expect(matchPastes(textTags('[Pasted text #32 +8 lines]'), new Set(), stale).size).toBe(0)
+  expect(stale).toEqual(['B1 · Encre'])
 })
 
 test('a preview is the first line with words, cut to the tile', () => {

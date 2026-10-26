@@ -1,7 +1,7 @@
 {
   "name": "paste-view",
   "description": "See and edit what you paste into Claude Code: image thumbnails and text notes above the prompt, an editor for pasted text, and a paste that is never folded",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": {
     "name": "Mathias Bradiceanu",
     "url": "https://github.com/Snouzy"

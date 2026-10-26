@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { PastedImage, PastedText } from '../types'
 import { afterImage, blockCells, drawsPictures, fitRow, fitTextTiles, imageNumbers, pngSize, removeImage, TEXT_TILE_COLUMNS } from './layout'
 import type { Size } from './layout'
-import { editorRows, expandNotes, lineCount, matchPastes, noteTag, preview, removeTag, replaceTag, textTags } from './pastes'
+import { agrees, editorRows, expandNotes, matchPastes, noteTag, preview, removeTag, replaceTag, textTags } from './pastes'
 import type { TextKind } from './pastes'
 import { decodeThumb } from './png'
 import type { Thumb } from './png'
@@ -191,14 +191,15 @@ async function showTexts($: EngineInterface, draft: string) {
   if (key === textsKey) return
   const before = new Set((textsKey ?? '').split('|'))
   textsKey = key
-  for (const [n, text] of matchPastes(tags, new Set(pastes.keys()), pending)) pastes.set(n, text)
-  // A tag that just appeared with no paste seen going in: the clipboard is what was pasted when
-  // its line count agrees with the tag's.
+  // A tag that just appeared was pasted within the last poll: the clipboard still holds that text,
+  // so it comes first, when its line count agrees with the tag's. Claude Code doesn't raise
+  // prompt.edit for a paste it folds, so what prompt.edit did show (pending) is only a fallback.
   for (const tag of tags) {
     if (tag.kind !== 'paste' || pastes.has(tag.n) || before.has(tag.tag)) continue
     const text = await clipboard($)
-    if (text !== undefined && (lineCount(text) === tag.lines || lineCount(text) - 1 === tag.lines)) pastes.set(tag.n, text)
+    if (text !== undefined && agrees(text, tag.lines)) pastes.set(tag.n, text)
   }
+  for (const [n, text] of matchPastes(tags, new Set(pastes.keys()), pending)) pastes.set(n, text)
   const list: PastedText[] = []
   for (const tag of tags) {
     const text = await textOf($, tag.kind, tag.n)

@@ -40,20 +40,25 @@ export function textTags(draft: string): TextTag[] {
   return found
 }
 
+/** Whether a text can be what a `+N lines` tag folded: Claude Code counts its lines one short at times. */
+export function agrees(text: string, lines: number): boolean {
+  const count = lineCount(text)
+  return count === lines || count - 1 === lines
+}
+
 /**
  * Pairs the pasted-text tags whose text isn't known yet with the pastes seen at `prompt.edit`, in
- * order; a paste whose line count agrees with the tag's `+N lines` is preferred over the oldest.
- * Each paste is used once; the ones taken are removed from `pending`.
+ * order: the oldest paste whose line count agrees with the tag's `+N lines`, and none when no
+ * paste agrees (a short paste Claude Code never folds also goes through `prompt.edit`, so a tag
+ * must not fall back on whatever is oldest). Each paste is used once; the ones taken are removed
+ * from `pending`.
  */
 export function matchPastes(tags: readonly TextTag[], known: ReadonlySet<number>, pending: string[]): Map<number, string> {
   const matched = new Map<number, string>()
   for (const tag of tags) {
-    if (tag.kind !== 'paste' || known.has(tag.n) || matched.has(tag.n) || pending.length === 0) continue
-    let index = pending.findIndex(text => {
-      const lines = lineCount(text)
-      return lines === tag.lines || lines - 1 === tag.lines
-    })
-    if (index < 0) index = 0
+    if (tag.kind !== 'paste' || known.has(tag.n) || matched.has(tag.n)) continue
+    const index = pending.findIndex(text => agrees(text, tag.lines))
+    if (index < 0) continue
     matched.set(tag.n, pending[index]!)
     pending.splice(index, 1)
   }
